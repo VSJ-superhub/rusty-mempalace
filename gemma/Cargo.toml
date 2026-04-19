@@ -17,4 +17,4 @@ thiserror = "1"
 [dev-dependencies]
 mockito = "1"
 wiremock = "0.6"
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
