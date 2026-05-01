@@ -2,8 +2,14 @@
 name = "yourmemory-gemma"
 version = "0.1.0"
 edition = "2021"
+description = "Pluggable write-time compression backends for yourmemory (Ollama, OpenAI, Anthropic)"
+license = "MIT"
+repository = "https://github.com/VSJ-superhub/rusty-mempalace"
+keywords = ["memory", "ai", "llm", "compression", "ollama"]
+categories = ["development-tools"]
 
 [dependencies]
+yourmemory-core = { path = "../core", version = "0.1.0" }
 anyhow = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

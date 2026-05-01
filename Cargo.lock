@@ -2567,6 +2567,7 @@ dependencies = [
  "tokio",
  "walkdir",
  "yourmemory-core",
+ "yourmemory-mcp",
 ]
 
 [[package]]
@@ -2598,6 +2599,7 @@ dependencies = [
  "toml",
  "tracing",
  "wiremock",
+ "yourmemory-core",
 ]
 
 [[package]]
