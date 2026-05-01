@@ -1,1 +1,7 @@
 /target
+.claude/
+.gemini/
+.yourmemory/
+__pycache__/
+*.egg-info/
+*.pyc

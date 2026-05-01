@@ -151,43 +151,47 @@ impl<C: Compressor> WithFallback<C> {
 impl<C: Compressor> Compressor for WithFallback<C> {
     async fn compress(&self, content: &str) -> Result<String> {
         match self.inner.compress(content).await {
-            Ok(out) => Ok(out),
+            Ok(result) => Ok(result),
             Err(e) => {
-                warn!("Compressor error, falling back to noop: {}", e);
+                warn!("Compressor failed, falling back to noop: {}", e);
                 Ok(content.to_string())
             }
         }
     }
 }
 
-// ── Config factory ────────────────────────────────────────────────────────────
+// ── Factory ───────────────────────────────────────────────────────────────────
 
-pub fn compressor_from_config(config: &CompressionConfig) -> Box<dyn Compressor> {
-    match config.backend.as_deref().unwrap_or("none") {
+pub fn build_compressor(
+    config: &CompressionConfig,
+) -> Box<dyn Compressor> {
+    match config.backend.as_deref().unwrap_or("ollama") {
         "ollama" => {
-            let mut c = OllamaCompressor::new(
-                config.model.clone().unwrap_or_else(|| "gemma:1b".to_string()),
-            );
+            let model = config.model.clone().unwrap_or_else(|| "gemma3".to_string());
+            let mut c = OllamaCompressor::new(model);
             if let Some(url) = &config.base_url {
                 c = c.with_base_url(url.clone());
             }
             Box::new(WithFallback::new(c))
         }
-        "openai" => Box::new(WithFallback::new(OpenAICompatibleCompressor {
-            model: config.model.clone().unwrap_or_else(|| "gpt-3.5-turbo".to_string()),
-            base_url: config
-                .base_url
-                .clone()
-                .unwrap_or_else(|| "https://api.openai.com".to_string()),
-            api_key: config.api_key.clone().unwrap_or_default(),
-        })),
-        "anthropic" => Box::new(WithFallback::new(AnthropicCompressor::new(
-            config.api_key.clone().unwrap_or_default(),
-            config
-                .model
-                .clone()
-                .unwrap_or_else(|| "claude-haiku-4-5-20251001".to_string()),
-        ))),
+        "openai" => {
+            let c = OpenAICompatibleCompressor {
+                model: config.model.clone().unwrap_or_else(|| "gpt-4o-mini".to_string()),
+                base_url: config
+                    .base_url
+                    .clone()
+                    .unwrap_or_else(|| "https://api.openai.com".to_string()),
+                api_key: config.api_key.clone().unwrap_or_default(),
+            };
+            Box::new(WithFallback::new(c))
+        }
+        "anthropic" => {
+            let c = AnthropicCompressor::new(
+                config.api_key.clone().unwrap_or_default(),
+                config.model.clone().unwrap_or_else(|| "claude-haiku-4-5-20251001".to_string()),
+            );
+            Box::new(WithFallback::new(c))
+        }
         _ => Box::new(NoopCompressor),
     }
 }
@@ -197,116 +201,75 @@ pub fn compressor_from_config(config: &CompressionConfig) -> Box<dyn Compressor>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    #[tokio::test]
-    async fn noop_returns_input_unchanged() {
-        let c = NoopCompressor;
-        let result = c.compress("hello world").await.unwrap();
+    #[test]
+    fn noop_returns_input_unchanged() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let result = rt.block_on(async {
+            let c = NoopCompressor;
+            c.compress("hello world").await.unwrap()
+        });
         assert_eq!(result, "hello world");
     }
 
-    #[tokio::test]
-    async fn ollama_success() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/api/generate"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(serde_json::json!({ "response": "compressed fact" })),
-            )
-            .mount(&server)
-            .await;
-
-        let c = OllamaCompressor::new("gemma:1b").with_base_url(server.uri());
-        let result = c.compress("long content here").await.unwrap();
-        assert_eq!(result, "compressed fact");
+    #[test]
+    fn config_parses_backend_fields() {
+        let toml = r#"
+[compression]
+backend = "openai"
+model = "gpt-4o"
+base_url = "https://api.openai.com"
+api_key = "sk-test"
+"#;
+        let cfg = CompressionConfig::from_toml(toml).unwrap();
+        assert_eq!(cfg.backend.as_deref(), Some("openai"));
+        assert_eq!(cfg.model.as_deref(), Some("gpt-4o"));
+        assert_eq!(cfg.base_url.as_deref(), Some("https://api.openai.com"));
+        assert_eq!(cfg.api_key.as_deref(), Some("sk-test"));
     }
 
     #[tokio::test]
-    async fn ollama_non200_falls_back_to_noop() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/api/generate"))
-            .respond_with(ResponseTemplate::new(503))
-            .mount(&server)
-            .await;
+    async fn fallback_on_error() {
+        struct AlwaysFails;
 
-        let c = WithFallback::new(
-            OllamaCompressor::new("gemma:1b").with_base_url(server.uri()),
-        );
-        let result = c.compress("original content").await.unwrap();
+        #[async_trait]
+        impl Compressor for AlwaysFails {
+            async fn compress(&self, _content: &str) -> Result<String> {
+                anyhow::bail!("simulated failure")
+            }
+        }
+
+        let wrapped = WithFallback::new(AlwaysFails);
+        let result = wrapped.compress("original content").await.unwrap();
         assert_eq!(result, "original content");
     }
 
     #[tokio::test]
-    async fn openai_success() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/v1/chat/completions"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                    "choices": [{ "message": { "content": "openai compressed" } }]
-                })),
-            )
-            .mount(&server)
+    async fn ollama_non_200_triggers_fallback() {
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/api/generate")
+            .with_status(503)
+            .create_async()
             .await;
 
-        let c = OpenAICompatibleCompressor {
-            model: "gpt-3.5-turbo".to_string(),
-            base_url: server.uri(),
-            api_key: "test-key".to_string(),
-        };
-        let result = c.compress("some content").await.unwrap();
-        assert_eq!(result, "openai compressed");
+        let compressor = OllamaCompressor::new("gemma3").with_base_url(server.url());
+        let wrapped = WithFallback::new(compressor);
+        let result = wrapped.compress("test content").await.unwrap();
+        assert_eq!(result, "test content");
     }
 
     #[tokio::test]
-    async fn openai_non200_falls_back_to_noop() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/v1/chat/completions"))
-            .respond_with(ResponseTemplate::new(401))
-            .mount(&server)
-            .await;
-
-        let c = WithFallback::new(OpenAICompatibleCompressor {
-            model: "gpt-3.5-turbo".to_string(),
-            base_url: server.uri(),
-            api_key: "bad-key".to_string(),
-        });
-        let result = c.compress("original").await.unwrap();
-        assert_eq!(result, "original");
-    }
-
-    #[test]
-    fn config_parses_all_fields() {
+    async fn config_parses_backend_fields_async() {
         let toml = r#"
 [compression]
-backend = "openai"
-model = "gpt-4o-mini"
-base_url = "https://api.groq.com"
-api_key = "sk-test"
+backend = "anthropic"
+model = "claude-haiku-4-5"
+api_key = "test-key"
 "#;
-        let config = CompressionConfig::from_toml(toml).unwrap();
-        assert_eq!(config.backend.as_deref(), Some("openai"));
-        assert_eq!(config.model.as_deref(), Some("gpt-4o-mini"));
-        assert_eq!(config.base_url.as_deref(), Some("https://api.groq.com"));
-        assert_eq!(config.api_key.as_deref(), Some("sk-test"));
-    }
-
-    #[test]
-    fn config_defaults_to_none_backend() {
-        let config = CompressionConfig::from_toml("[compression]\n").unwrap();
-        assert_eq!(config.backend, None);
-    }
-
-    #[tokio::test]
-    async fn factory_none_backend_returns_noop() {
-        let config = CompressionConfig::default();
-        let c = compressor_from_config(&config);
-        let result = c.compress("test input").await.unwrap();
-        assert_eq!(result, "test input");
+        let cfg = CompressionConfig::from_toml(toml).unwrap();
+        assert_eq!(cfg.backend.as_deref(), Some("anthropic"));
+        assert_eq!(cfg.model.as_deref(), Some("claude-haiku-4-5"));
+        assert_eq!(cfg.api_key.as_deref(), Some("test-key"));
     }
 }

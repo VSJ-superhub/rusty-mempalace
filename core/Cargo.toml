@@ -2,6 +2,11 @@
 name = "yourmemory-core"
 version = "0.1.0"
 edition = "2021"
+description = "Storage engine for the yourmemory offline-first AI memory system"
+license = "MIT"
+repository = "https://github.com/VSJ-superhub/rusty-mempalace"
+keywords = ["memory", "ai", "mcp", "llm", "storage"]
+categories = ["database-implementations", "data-structures"]
 
 [dependencies]
 serde = { workspace = true }
@@ -10,6 +15,7 @@ rusqlite = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 chrono = { version = "0.4", features = ["serde"] }
+toml = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

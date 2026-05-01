@@ -2,6 +2,17 @@
 name = "yourmemory-mcp"
 version = "0.1.0"
 edition = "2021"
+description = "MCP stdio server for the yourmemory AI memory system — 20 tools over JSON-RPC"
+license = "MIT"
+repository = "https://github.com/VSJ-superhub/rusty-mempalace"
+keywords = ["memory", "ai", "mcp", "llm", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+
+autobins = false
+
+[lib]
+name = "yourmemory_mcp"
+path = "src/lib.rs"
 
 [[bin]]
 name = "yourmemory-mcp"
@@ -15,5 +26,5 @@ tokio = { workspace = true, features = ["io-util", "macros"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 chrono = { workspace = true }
-yourmemory-core = { path = "../core" }
-yourmemory-gemma = { path = "../gemma" }
+yourmemory-core = { path = "../core", version = "0.1.0" }
+yourmemory-gemma = { path = "../gemma", version = "0.1.0" }

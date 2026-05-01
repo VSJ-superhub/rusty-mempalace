@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use chrono::Utc;
 use rusqlite::{Connection, Result as SqlResult, params};
 use thiserror::Error;
+use crate::palace::sanitize_fts_query;
 
 #[derive(Debug, Error)]
 pub enum StorageError {
@@ -77,7 +78,7 @@ impl Source {
 
 // ── Structs ───────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Wing {
     pub id: i64,
     pub name: String,
@@ -85,7 +86,7 @@ pub struct Wing {
     pub created_at: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Room {
     pub id: i64,
     pub wing_id: i64,
@@ -94,7 +95,7 @@ pub struct Room {
     pub created_at: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Drawer {
     pub id: i64,
     pub wing_id: i64,
@@ -110,7 +111,7 @@ pub struct Drawer {
     pub invalidated_at: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct NewDrawer {
     pub wing_id: i64,
     pub room_id: i64,
@@ -120,7 +121,7 @@ pub struct NewDrawer {
     pub source: Source,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct KgEdge {
     pub id: i64,
     pub subject_drawer_id: i64,
@@ -131,7 +132,7 @@ pub struct KgEdge {
 }
 
 /// A temporal relation between two drawers in the knowledge graph.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Relation {
     pub id: i64,
     pub source_drawer_id: i64,
@@ -184,6 +185,13 @@ pub trait Storage {
         valid_from: Option<&str>,
         valid_until: Option<&str>,
     ) -> Result<()>;
+
+    fn drawer_count(&self) -> Result<i64>;
+    fn get_drawers_by_room(&self, room_id: i64, limit: usize) -> Result<Vec<Drawer>>;
+
+    // Structural deletion
+    fn forget_room(&self, room_id: i64) -> Result<i64>;
+    fn forget_wing(&self, wing_id: i64) -> Result<i64>;
 
     // Forgetting subsystem
     /// Mark a drawer as invalidated, recording the timestamp. Invalidated
@@ -494,6 +502,7 @@ impl Storage for SqliteStorage {
     }
 
     fn search_drawers(&self, query: &str, limit: usize) -> Result<Vec<Drawer>> {
+        let safe_query = sanitize_fts_query(query);
         let mut stmt = self.conn.prepare(
             "SELECT d.id, d.wing_id, d.room_id, d.content, d.compressed_content, \
                     d.confidence, d.source, d.access_count, d.last_accessed_at, \
@@ -505,7 +514,7 @@ impl Storage for SqliteStorage {
              LIMIT ?2",
         )?;
         let rows = stmt
-            .query_map(params![query, limit as i64], row_to_drawer)?
+            .query_map(params![safe_query, limit as i64], row_to_drawer)?
             .collect::<SqlResult<Vec<_>>>()?;
         Ok(rows)
     }
@@ -633,6 +642,47 @@ impl Storage for SqliteStorage {
             params![valid_from, valid_until, relation_id],
         )?;
         Ok(())
+    }
+
+    fn drawer_count(&self) -> Result<i64> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM drawers WHERE is_invalidated = 0",
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(count)
+    }
+
+    fn get_drawers_by_room(&self, room_id: i64, limit: usize) -> Result<Vec<Drawer>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {DRAWER_SELECT} FROM drawers \
+             WHERE room_id = ?1 AND is_invalidated = 0 \
+             ORDER BY created_at DESC \
+             LIMIT ?2"
+        ))?;
+        let rows = stmt
+            .query_map(params![room_id, limit as i64], row_to_drawer)?
+            .collect::<SqlResult<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    fn forget_room(&self, room_id: i64) -> Result<i64> {
+        let deleted = self.conn.execute(
+            "DELETE FROM drawers WHERE room_id = ?1",
+            params![room_id],
+        )? as i64;
+        self.conn.execute("DELETE FROM rooms WHERE id = ?1", params![room_id])?;
+        Ok(deleted)
+    }
+
+    fn forget_wing(&self, wing_id: i64) -> Result<i64> {
+        let deleted = self.conn.execute(
+            "DELETE FROM drawers WHERE wing_id = ?1",
+            params![wing_id],
+        )? as i64;
+        self.conn.execute("DELETE FROM rooms WHERE wing_id = ?1", params![wing_id])?;
+        self.conn.execute("DELETE FROM wings WHERE id = ?1", params![wing_id])?;
+        Ok(deleted)
     }
 
     // ── Forgetting subsystem ──────────────────────────────────────────────────

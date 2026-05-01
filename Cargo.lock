@@ -2567,6 +2567,7 @@ dependencies = [
  "tokio",
  "walkdir",
  "yourmemory-core",
+ "yourmemory-mcp",
 ]
 
 [[package]]
@@ -2580,6 +2581,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror",
+ "toml",
 ]
 
 [[package]]
@@ -2597,6 +2599,7 @@ dependencies = [
  "toml",
  "tracing",
  "wiremock",
+ "yourmemory-core",
 ]
 
 [[package]]

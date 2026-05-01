@@ -2,17 +2,27 @@
 name = "yourmemory"
 version = "0.1.0"
 edition = "2021"
+description = "Local, offline-first AI memory system — gives any AI client long-term memory via MCP"
+license = "MIT"
+repository = "https://github.com/VSJ-superhub/rusty-mempalace"
+keywords = ["memory", "ai", "mcp", "llm", "cli"]
+categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
 name = "yourmemory"
 path = "src/main.rs"
+
+[[bin]]
+name = "yourmemory-mcp"
+path = "src/mcp_main.rs"
 
 [dependencies]
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
-yourmemory-core = { path = "../core" }
+yourmemory-core = { path = "../core", version = "0.1.0" }
+yourmemory-mcp = { path = "../mcp", version = "0.1.0" }
 clap = { version = "4", features = ["derive"] }
 rayon = "1"
 walkdir = "2"
