@@ -777,6 +777,15 @@ impl Palace {
 }
 
 fn find_palace_dir(start: &Path) -> Result<PathBuf> {
+    // Opt-in anchor: when YOURMEMORY_PALACE is set, it overrides walk-up resolution
+    // so every call targets one canonical palace dir (the dir containing palace.db),
+    // regardless of cwd or the project_path passed. Unset = original behavior.
+    if let Ok(anchor) = std::env::var("YOURMEMORY_PALACE") {
+        if !anchor.trim().is_empty() {
+            return Ok(PathBuf::from(anchor));
+        }
+    }
+
     let mut current = start.to_path_buf();
     loop {
         let candidate = current.join(".yourmemory");
