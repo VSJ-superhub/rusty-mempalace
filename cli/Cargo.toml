@@ -23,6 +23,7 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 yourmemory-core = { path = "../core", version = "0.1.0" }
 yourmemory-mcp = { path = "../mcp", version = "0.1.0" }
+yourmemory-server = { path = "../server", version = "0.1.0" }
 clap = { version = "4", features = ["derive"] }
 rayon = "1"
 walkdir = "2"

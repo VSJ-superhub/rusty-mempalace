@@ -55,7 +55,8 @@ yourmemory/
 ├── core/          # Rust — storage engine, knowledge graph, forgetting, WAL
 ├── gemma/         # Ollama client — write-time classification & compression
 ├── mcp/           # MCP server — 20 tools exposed to all MCP-compatible clients
-├── cli/           # CLI commands: init, setup, health, mine, search, wakeup, persist
+├── server/        # HTTP server + REST API + embedded web dashboard (Axum, opt-in)
+├── cli/           # CLI commands: init, setup, health, mine, search, wakeup, persist, serve, token
 ├── hooks/         # Hook config templates per client (Claude, Gemini, Kiro)
 ├── schemas/       # Domain taxonomy definitions (general, incident, education, custom)
 ├── langgraph/     # Python package — MemoryReadNode, MemoryWriteNode, MemoryState
@@ -214,6 +215,60 @@ All tools return structured JSON. Error responses include actionable messages.
 
 ---
 
+## Network Server & Web Dashboard (`yourmemory serve`)
+
+An **opt-in** HTTP layer in the `server/` crate (Axum + tokio), separate from the stdio MCP
+server. It serves a single-page web dashboard (`/ui`) and a REST API (`/api`) for browsing and
+editing the palace: Graph Explorer, Room Navigator, Audit Log, Confidence Heatmap, Admin.
+
+The dashboard is the first feature that opens a network port, so it is **secure by default**:
+
+```
+yourmemory serve                       # binds 127.0.0.1:7700 only (loopback)
+yourmemory serve --listen 0.0.0.0:7700 # refuses to start unless a token exists
+```
+
+- **Loopback by default.** No flags ⇒ loopback-only, safe to run on a laptop with zero config.
+- **No anonymous network exposure.** Binding to a non-loopback address requires at least one
+  configured access token, or `serve` exits with instructions.
+- **One write path.** The REST API wraps existing `core` Palace + WAL functions — it never opens
+  its own connection for hand-written write SQL. UI edits and CLI/MCP writes share one audit trail.
+- **Read path stays deterministic.** Dashboard read endpoints never invoke Gemma/Ollama.
+- **Static assets embedded** in the binary via `rust-embed` (target: <2MB size increase). No
+  separate frontend server, no build step.
+
+Full UI/endpoint spec lives in `.claude/frontend.md`.
+
+---
+
+## Access Control (token / grant model)
+
+The dashboard's compliance value (scoped audit log, CSV export) requires a **real** access
+boundary, not a stub. The token/grant model lives in `core` so scoping is enforced inside query
+functions — no endpoint can leak an out-of-scope wing.
+
+- A **token** has: id, label, hashed secret (never stored plaintext), created_at, last_used_at,
+  revoked_at (soft revoke — audit-preserving).
+- A token holds **per-wing grants**: `(token_id, wing, level)` with `level ∈ read | write | admin`.
+- No grant for a wing ⇒ that wing is invisible in graph, search, audit, heatmap, and stats.
+- A global admin grant (`*` wing, `admin`) permits token management.
+
+CLI surface:
+
+```bash
+yourmemory token create --label <name> --grant <wing>:<read|write|admin> [...]  # prints secret once
+yourmemory token list                                                           # masked
+yourmemory token revoke <id>                                                    # soft
+yourmemory token grant <id> <wing>:<level>
+```
+
+The HTTP auth middleware resolves `Authorization: Bearer <token>` → grant set, then every handler
+scopes its `core` calls to that set (401 missing/invalid, 403 insufficient grant). Auth failures
+are rate-limited and written to the WAL. This access model applies only to the network server; the
+local stdio MCP/CLI path is unchanged (single-user, filesystem-permission trust).
+
+---
+
 ## Domain Schemas
 
 Schemas are **optional taxonomies** that give the palace opinionated structure. Users can:
@@ -312,6 +367,8 @@ yourmemory persist [--session <id>] # flush session buffer to palace
 yourmemory compact                 # run forgetting + compression pass
 yourmemory export [--format json]  # export palace contents
 yourmemory mcp-server              # start MCP server (used by client configs)
+yourmemory serve [--listen <addr>] # start HTTP server + web dashboard (loopback by default)
+yourmemory token <create|list|revoke|grant> ...  # manage dashboard access tokens
 ```
 
 ---

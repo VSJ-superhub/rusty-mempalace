@@ -1,0 +1,28 @@
+[package]
+name = "yourmemory-server"
+version = "0.1.0"
+edition = "2021"
+description = "HTTP server + REST API + embedded web dashboard for the yourmemory AI memory system"
+license = "MIT"
+repository = "https://github.com/VSJ-superhub/rusty-mempalace"
+keywords = ["memory", "ai", "dashboard", "axum", "server"]
+categories = ["web-programming::http-server"]
+
+[lib]
+name = "yourmemory_server"
+path = "src/lib.rs"
+
+[dependencies]
+yourmemory-core = { path = "../core", version = "0.1.0" }
+axum = "0.7"
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+rust-embed = "8"
+mime_guess = "2"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

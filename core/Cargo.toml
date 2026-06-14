@@ -16,6 +16,8 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 chrono = { version = "0.4", features = ["serde"] }
 toml = { workspace = true }
+sha2 = "0.10"
+getrandom = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
