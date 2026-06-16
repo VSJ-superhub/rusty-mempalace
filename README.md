@@ -170,6 +170,37 @@ The memory system handles deduplication, compression, and routing automatically.
 
 ---
 
+## Promotion gate
+
+Not every write deserves to become a durable memory. Without a gate, an unattributed, low-confidence claim made mid-conversation becomes a permanent "fact" indistinguishable from a verified one — the classic place memory poisoning starts.
+
+`persist` and `store_fact` therefore run each write through a **promotion gate**. Every write is classified into a `kind`, and a per-kind rule decides whether it is promoted to durable storage or rejected with an actionable reason.
+
+| `kind` | Rule |
+|--------|------|
+| `observation` | Always promoted. Lowest tier — raw scratch notes. |
+| `fact` | Promoted only if `confidence ≥ 0.7` **and** the write is attributable (a `source_run_id` is supplied, or `source` is `user` / `system` / `config` rather than `conversation`). |
+| `episode` | Promoted only when `task_complete=true` — a summary of a finished task/session. |
+| `policy` | Never auto-promotes. Requires explicit `confirm=true` (human-in-the-loop). |
+
+Confidence levels map to scores as: `high=0.9`, `medium=0.7`, `low=0.4`, `inferred=0.2`. The fact threshold is `0.7`, so `high` and `medium` clear it while `low` and `inferred` do not.
+
+When a write is rejected, the tool returns `{ "status": "rejected", "reason": "..." }` with guidance on how to make it promotable — e.g. raise confidence, supply a `source_run_id`, set `task_complete=true`, or store it as `kind=observation` instead. Nothing is silently dropped or silently written.
+
+```
+# Rejected — a bare conversational claim can't become a fact
+store_fact(wing="infra", room="db", content="prod runs Postgres 16",
+           kind="fact", confidence="high")
+# → { "status": "rejected", "reason": "fact rejected: unattributed — supply
+#     source_run_id, or set source to user/system/config" }
+
+# Promoted — attributed via source_run_id
+store_fact(wing="infra", room="db", content="prod runs Postgres 16",
+           kind="fact", confidence="high", source_run_id="run-2026-06-15-a")
+```
+
+---
+
 ## MCP tools reference
 
 ### Read
@@ -185,10 +216,19 @@ The memory system handles deduplication, compression, and routing automatically.
 
 | Tool | Description |
 |------|-------------|
-| `persist` | Store a memory, auto-routing to `general/notes` if wing/room are omitted; runs compression |
-| `store_fact` | Store a fact with an explicit wing and room (no auto-routing) |
+| `persist` | Store a memory, auto-routing to `general/notes` if wing/room are omitted; runs compression. Defaults to `kind=observation`. Subject to the [promotion gate](#promotion-gate). |
+| `store_fact` | Store a fact with an explicit wing and room (no auto-routing). Defaults to `kind=fact` — facts need `confidence ≥ 0.7` and attribution. Subject to the [promotion gate](#promotion-gate). |
 | `update_fact` | Replace the content of an existing drawer by ID |
 | `invalidate_fact` | Soft-delete a drawer — excluded from reads but kept for audit |
+
+Both write tools accept these gate-related arguments:
+
+| Argument | Type | Purpose |
+|----------|------|---------|
+| `kind` | `observation` \| `fact` \| `episode` \| `policy` | Selects which promotion rule applies. Defaults to `observation` for `persist`, `fact` for `store_fact`. |
+| `source_run_id` | string | Run/session id that produced the claim — satisfies the attribution requirement for facts. |
+| `task_complete` | bool | Must be `true` to promote an `episode`. |
+| `confirm` | bool | Must be `true` to promote a `policy` (human-in-the-loop). |
 
 ### Structure
 
