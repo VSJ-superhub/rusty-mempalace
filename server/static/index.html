@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>yourmemory dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="/ui/style.css" />
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-logo">
+        <span class="logo-mark">◈</span>
+        <span class="logo-text">yourmemory</span>
+      </div>
+      <nav class="sidebar-nav">
+        <a class="nav-item" data-view="rooms"><span class="nav-icon">▤</span><span>Room Navigator</span></a>
+        <a class="nav-item" data-view="probe"><span class="nav-icon">⌕</span><span>Retrieval Probe</span></a>
+        <a class="nav-item" data-view="graph"><span class="nav-icon">◎</span><span>Graph Explorer</span></a>
+        <a class="nav-item" data-view="audit"><span class="nav-icon">▦</span><span>Audit Log</span></a>
+        <a class="nav-item" data-view="sessions"><span class="nav-icon">⇄</span><span>Session Diff</span></a>
+        <a class="nav-item" data-view="heatmap"><span class="nav-icon">▩</span><span>Heatmap</span></a>
+        <a class="nav-item" data-view="admin"><span class="nav-icon">⚙</span><span>Admin</span></a>
+      </nav>
+      <div class="sidebar-footer"><span class="version-badge">alpha</span></div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <h1 class="page-title" id="page-title">Room Navigator</h1>
+        <div class="topbar-spacer"></div>
+        <div class="token-control">
+          <span id="conn-dot" class="conn-dot" title="connection status"></span>
+          <input id="token-input" class="token-input" type="password"
+                 placeholder="Bearer token (optional on loopback)" autocomplete="off" spellcheck="false" />
+          <button id="token-save" class="btn">Connect</button>
+          <button id="refresh" class="btn btn--ghost" title="Reload current view">↻</button>
+        </div>
+      </header>
+
+      <div id="health-bar" class="health-bar health-bar--unknown">
+        <span class="health-dot"></span>
+        <span id="health-text" class="health-text">checking…</span>
+      </div>
+      <div id="banner" class="banner" hidden></div>
+      <div id="view" class="view"></div>
+    </main>
+  </div>
+
+  <!-- D3 for the graph view (allowed CDN; vendoring instructions in frontend.md). -->
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="/ui/app.js"></script>
+  <script src="/ui/rooms.js"></script>
+  <script src="/ui/probe.js"></script>
+  <script src="/ui/graph.js"></script>
+  <script src="/ui/audit.js"></script>
+  <script src="/ui/sessions.js"></script>
+  <script src="/ui/heatmap.js"></script>
+  <script src="/ui/admin.js"></script>
+</body>
+</html>

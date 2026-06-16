@@ -1,5 +1,5 @@
 [workspace]
-members = ["core", "gemma", "mcp", "cli"]
+members = ["core", "gemma", "mcp", "cli", "server"]
 resolver = "2"
 
 [workspace.dependencies]

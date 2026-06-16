@@ -7,6 +7,8 @@ use yourmemory_core::{
 };
 use yourmemory_gemma::{build_compressor, CompressionConfig};
 
+mod promotion;
+
 pub async fn run() -> anyhow::Result<()> {
     tracing_subscriber::fmt().with_writer(std::io::stderr).init();
 
@@ -111,10 +113,14 @@ fn handle_tools_list() -> Value {
                 "wing": { "type": "string", "description": "Wing name (default: general)" },
                 "room": { "type": "string", "description": "Room name (default: notes)" },
                 "source": { "type": "string", "enum": ["conversation","config","system","user"] },
-                "confidence": { "type": "string", "enum": ["high","medium","low","inferred"] }
+                "confidence": { "type": "string", "enum": ["high","medium","low","inferred"] },
+                "kind": { "type": "string", "enum": ["observation","fact","episode","policy"], "description": "Memory type for the promotion gate (default: observation)" },
+                "source_run_id": { "type": "string", "description": "Run/session id; attributes a fact for promotion" },
+                "task_complete": { "type": "boolean", "description": "Required true to promote an episode" },
+                "confirm": { "type": "boolean", "description": "Required true to promote a policy (human-in-the-loop)" }
             }
         })),
-        tool_def("store_fact", "Store a fact with explicit wing and room.", json!({
+        tool_def("store_fact", "Store a fact with explicit wing and room. Gated: facts need confidence>=0.7 and attribution (source_run_id or non-conversation source).", json!({
             "type": "object",
             "required": ["wing", "room", "content"],
             "properties": {
@@ -123,7 +129,11 @@ fn handle_tools_list() -> Value {
                 "room": { "type": "string" },
                 "content": { "type": "string" },
                 "source": { "type": "string", "enum": ["conversation","config","system","user"] },
-                "confidence": { "type": "string", "enum": ["high","medium","low","inferred"] }
+                "confidence": { "type": "string", "enum": ["high","medium","low","inferred"] },
+                "kind": { "type": "string", "enum": ["observation","fact","episode","policy"], "description": "Memory type for the promotion gate (default: fact)" },
+                "source_run_id": { "type": "string", "description": "Run/session id; attributes a fact for promotion" },
+                "task_complete": { "type": "boolean", "description": "Required true to promote an episode" },
+                "confirm": { "type": "boolean", "description": "Required true to promote a policy (human-in-the-loop)" }
             }
         })),
         tool_def("update_fact", "Replace the content of an existing drawer.", json!({
@@ -337,6 +347,34 @@ fn parse_confidence(s: Option<&str>) -> Confidence {
     }
 }
 
+/// Build a [`promotion::WriteRequest`] from already-parsed tool args and run the
+/// gate. Returns `Err` with a JSON rejection result if the write is refused, so
+/// callers can `?`-propagate via `gate(...)?`.
+fn gate_write(
+    args: &Value,
+    default_kind: &str,
+    confidence: &Confidence,
+    source: &Source,
+) -> Result<(), Value> {
+    let kind = promotion::MemoryKind::parse(
+        args.get("kind").and_then(|v| v.as_str()).or(Some(default_kind)),
+    );
+    let req = promotion::WriteRequest {
+        kind,
+        confidence,
+        source,
+        source_run_id: args.get("source_run_id").and_then(|v| v.as_str()),
+        task_complete: args.get("task_complete").and_then(|v| v.as_bool()).unwrap_or(false),
+        confirm: args.get("confirm").and_then(|v| v.as_bool()).unwrap_or(false),
+    };
+    match promotion::evaluate(&req) {
+        promotion::Decision::Promote => Ok(()),
+        promotion::Decision::Reject(reason) => {
+            Err(json_result(&json!({ "status": "rejected", "reason": reason })))
+        }
+    }
+}
+
 async fn compress_content(content: &str, project_path: &PathBuf) -> String {
     let config_path = project_path.join("config.toml");
     let toml = std::fs::read_to_string(&config_path).unwrap_or_default();
@@ -459,6 +497,12 @@ async fn tool_persist(args: &Value) -> anyhow::Result<Value> {
     let wing_name = args.get("wing").and_then(|v| v.as_str()).unwrap_or("general");
     let room_name = args.get("room").and_then(|v| v.as_str()).unwrap_or("notes");
 
+    let confidence = parse_confidence(args.get("confidence").and_then(|v| v.as_str()));
+    let source = parse_source(args.get("source").and_then(|v| v.as_str()));
+    if let Err(rejection) = gate_write(args, "observation", &confidence, &source) {
+        return Ok(rejection);
+    }
+
     let compressed = compress_content(content, &project_path).await;
     let compressed_content = if compressed != content { Some(compressed) } else { None };
 
@@ -469,8 +513,8 @@ async fn tool_persist(args: &Value) -> anyhow::Result<Value> {
         room_id: room.id,
         content: content.to_string(),
         compressed_content,
-        confidence: parse_confidence(args.get("confidence").and_then(|v| v.as_str())),
-        source: parse_source(args.get("source").and_then(|v| v.as_str())),
+        confidence,
+        source,
     })?;
     Ok(json_result(&json!(drawer)))
 }
@@ -483,6 +527,12 @@ async fn tool_store_fact(args: &Value) -> anyhow::Result<Value> {
     let room_name = args.get("room").and_then(|v| v.as_str()).ok_or_else(|| anyhow::anyhow!("room is required"))?;
     let content = args.get("content").and_then(|v| v.as_str()).ok_or_else(|| anyhow::anyhow!("content is required"))?;
 
+    let confidence = parse_confidence(args.get("confidence").and_then(|v| v.as_str()));
+    let source = parse_source(args.get("source").and_then(|v| v.as_str()));
+    if let Err(rejection) = gate_write(args, "fact", &confidence, &source) {
+        return Ok(rejection);
+    }
+
     let compressed = compress_content(content, &project_path).await;
     let compressed_content = if compressed != content { Some(compressed) } else { None };
 
@@ -493,8 +543,8 @@ async fn tool_store_fact(args: &Value) -> anyhow::Result<Value> {
         room_id: room.id,
         content: content.to_string(),
         compressed_content,
-        confidence: parse_confidence(args.get("confidence").and_then(|v| v.as_str())),
-        source: parse_source(args.get("source").and_then(|v| v.as_str())),
+        confidence,
+        source,
     })?;
     Ok(json_result(&json!(drawer)))
 }
